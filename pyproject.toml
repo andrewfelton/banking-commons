@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "banking-commons"
+version = "0.1.0"
+description = "Shared utilities for the banking-policy projects (email, and later LLM + storage)."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Andrew Felton" }]
+dependencies = [
+    "markdown>=3.5",
+]
+
+[project.optional-dependencies]
+# ACS email delivery. Kept optional so the markdown helpers stay dependency-light
+# and so a consumer that only renders HTML doesn't pull the Azure SDK.
+email = ["azure-communication-email>=1.0.0"]
+dev = ["pytest>=8.0"]
+
+[project.urls]
+Repository = "https://github.com/andrewfelton/banking-commons"
+
+[tool.setuptools.packages.find]
+where = ["src"]
