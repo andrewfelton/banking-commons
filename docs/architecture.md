@@ -63,9 +63,8 @@ content builders and error policy; only render+send is shared:
 | banking-legislation-tracker | `src/banking_tracker/email_report.py`| raise config + send                           |
 
 The two Azure Functions consumers (ai_news_feed, banking-legislation-tracker)
-install this package from its **private** git URL, so their remote (Oryx) builds
-need git credentials — or this repo goes public. See each project's deployment
-notes.
+install this package from its git URL on their remote (Oryx) build. The repo is
+**public**, so those builds resolve it with no credentials.
 
 ## Migration order
 
