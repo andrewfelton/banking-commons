@@ -143,6 +143,76 @@ az group delete -n regulations --yes
 After P1, `ai_news_feed` RG holds only the live ACS (`ainewsfeed`). P2 relocates
 it to `rg-banking-shared`, after which the `ai_news_feed` RG can also be deleted.
 
+## P2 runbook — shared ACS
+
+Stands up `acs-banking` in a neutral `rg-banking-shared`, repoints all four
+senders, verifies, then retires the old `ainewsfeed` ACS and its RG. Not executed
+for you — run after reading. A new Azure-managed domain means a **new sender
+address** (Step 3); the recipient var (`DIGEST_RECIPIENT` / `EMAIL_TO`) is
+unchanged everywhere.
+
+```bash
+SUB=70e0cd03-fbee-44bb-8617-4b2ea3f12837
+az account set --subscription "$SUB"
+SHARED_RG=rg-banking-shared
+DATA_LOC=UnitedStates        # mirrors the existing ACS
+
+# 1. Shared RG (region is just for metadata — ACS resources are global)
+az group create -n "$SHARED_RG" -l eastus
+
+# 2. Email Communication Service + Azure-managed domain (no DNS setup needed)
+az communication email create -n acs-banking -g "$SHARED_RG" \
+  --location global --data-location "$DATA_LOC"
+az communication email domain create -n AzureManagedDomain -g "$SHARED_RG" \
+  --email-service-name acs-banking --location global --domain-management AzureManaged
+
+# 3. >>> GET THE NEW SENDER ADDRESS <<<
+#    Managed domains auto-create a 'DoNotReply' sender username, so the full
+#    address is DoNotReply@<fromSenderDomain>.
+FROM=$(az communication email domain show -n AzureManagedDomain \
+  --email-service-name acs-banking -g "$SHARED_RG" --query fromSenderDomain -o tsv)
+echo "NEW sender address:  DoNotReply@$FROM"
+
+# 4. Communication Services resource, linked to the domain
+DOMAIN_ID=$(az communication email domain show -n AzureManagedDomain \
+  --email-service-name acs-banking -g "$SHARED_RG" --query id -o tsv)
+az communication create -n acs-banking -g "$SHARED_RG" \
+  --location global --data-location "$DATA_LOC" --linked-domains "$DOMAIN_ID"
+
+# 5. New connection string
+ACS_CONN=$(az communication list-key -n acs-banking -g "$SHARED_RG" \
+  --query primaryConnectionString -o tsv)
+SENDER="DoNotReply@$FROM"
+
+# 6. Repoint the two FUNCTION apps (settings take effect on next run):
+az functionapp config appsettings set -g feltonainews -n feltonainews --settings \
+  AZURE_COMMUNICATION_CONNECTION_STRING="$ACS_CONN" EMAIL_SENDER="$SENDER"
+az functionapp config appsettings set -g bank-data -n banking-legislation-tracker --settings \
+  ACS_CONNECTION_STRING="$ACS_CONN" ACS_SENDER_ADDRESS="$SENDER"
+
+#    Repoint the two LOCAL apps by editing their .env (var names differ per app):
+#      ~/code/comment_summarization/.env   ACS_CONNECTION_STRING + ACS_SENDER_ADDRESS
+#      ~/code/bank-filings-pipeline/.env   AZURE_COMMUNICATION_CONNECTION_STRING + EMAIL_SENDER
+echo "Set local .env conn string to:"; echo "$ACS_CONN"
+echo "Set local .env sender to:      $SENDER"
+
+# 7. VERIFY before deleting anything — send a test through the new ACS:
+( cd ~/code/comment_summarization && source .venv/bin/activate && \
+  ACS_CONNECTION_STRING="$ACS_CONN" ACS_SENDER_ADDRESS="$SENDER" DIGEST_RECIPIENT="andy.felton@gmail.com" \
+  python -c "from banking_commons.email import send_email; print(send_email('P2 ACS test', text='shared acs works', on_config_error='raise', on_send_error='raise'))" )
+#   Expect a SendResult(sent=True, status='Succeeded') and an email in your inbox.
+
+# 8. RETIRE the old ACS — ONLY after the test passes AND all four senders are
+#    repointed (Functions: confirm next run is green; local: next scheduled run).
+#    After P1 the ai_news_feed RG holds only the old ACS + a stray action group,
+#    so deleting the whole RG cleans it in one shot:
+az group delete -n ai_news_feed --yes
+```
+
+Result: `rg-banking-shared/acs-banking` is the single email sender for all four
+projects; `ai_news_feed` RG is gone. Update the current-state table and phase
+list above when done.
+
 ## Audit commands (rebuild this map)
 
 ```bash
