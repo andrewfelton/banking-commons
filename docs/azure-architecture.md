@@ -6,37 +6,42 @@ single map of what's deployed, what's cruft, and the target layout. It lives in
 `banking-commons` because the shared resource (ACS email) is the infra twin of
 the shared `banking_commons.email` code.
 
-> Snapshot date: 2026-06-13. Re-run the audit commands at the bottom if it's
-> been a while.
+> Snapshot date: 2026-06-13, **after P1 cleanup**. Re-run the audit commands at
+> the bottom if it's been a while.
 
 ## Current state
 
 | Project | Compute | Data storage → contents | Email | Resource group(s) |
 | --- | --- | --- | --- | --- |
-| ai_news_feed | Functions **Flex** (`feltonainews`) | `feltonainews` → `ProcessedPapers` | ACS `ainewsfeed` (mgd-identity storage) | **feltonainews** (compute) + **ai_news_feed** (email + dead storage) |
+| ai_news_feed | Functions **Flex** (`feltonainews`) | `feltonainews` → `ProcessedPapers` | ACS `ainewsfeed` (mgd-identity storage) | **feltonainews** (compute) + **ai_news_feed** (ACS only) |
 | banking-legislation-tracker | Functions **Consumption** (`EastUSLinuxDynamicPlan`) | `bankinglegislation` → `TrackedBills`, `TrackerMeta` | ACS `ainewsfeed` (conn-string) | bank-data |
 | bank-filings-pipeline | local cron | `bankdata1` → `FilingsManifest`, `sec-filings` | ACS `ainewsfeed` | bank-data (storage only) |
-| comment_summarization | local launchd | local FS (+ abandoned `regulations1`) | ACS `ainewsfeed` | regulations (legacy only) |
+| comment_summarization | local launchd | local FS | ACS `ainewsfeed` | — (local only) |
 | congressional-transcripts | local | local FS | — | — |
 
-**All four email senders already share one ACS resource** (`ainewsfeed`). That
-sharing is correct; the problem is it's named after one app and stranded in a
-half-abandoned resource group.
+**All four email senders share one ACS resource** (`ainewsfeed`). That sharing is
+correct; the remaining issue is it's named after one app and lives alone in the
+`ai_news_feed` RG. P2 relocates it to a neutral shared RG.
 
-### Cruft (verified unreferenced — see audit commands)
+### Removed in P1 — ✅ done 2026-06-13
 
-| Resource | Group | Why it's dead |
+| Resource | Group | Status |
 | --- | --- | --- |
-| `ainewsfeedstorage` (storage) | ai_news_feed | only holds an old app-package; no data tables |
-| `ainewsfeed` (storage) | ai_news_feed | `ProcessedPapers` here is stale — the live app writes to `feltonainews`'s copy |
-| `ainewsfeed` (App Insights) | ai_news_feed | duplicate; live app reports to `feltonainews` insights |
-| `ainewsfeed-uami` (managed identity) | ai_news_feed | old; live app uses `feltonainews-identities-*` |
-| `regulations1` (storage) | regulations | v1 cloud backend of comment_summarization; current app is local-FS only |
+| `ainewsfeedstorage` (storage) | ai_news_feed | deleted |
+| `ainewsfeed` (storage) | ai_news_feed | deleted |
+| `ainewsfeed` (App Insights) | ai_news_feed | deleted |
+| `ainewsfeed-uami` (managed identity) | ai_news_feed | deleted |
+| `regulations1` (storage) + `regulations` RG | regulations | deleted (RG gone) |
 
-> ⚠️ **Same-name trap:** `ainewsfeed` is BOTH a storage account and the live ACS
-> (Microsoft.Communication). Deleting the **storage account** does not touch the
-> ACS — different resource types — but double-check the resource type on every
-> delete.
+After P1 the `ai_news_feed` RG holds only the live ACS, plus one harmless
+leftover — an auto-created `Application Insights Smart Detection` action group
+(orphaned when its App Insights was deleted). It costs nothing and disappears
+when the RG is removed at the end of P2; delete early if you want it gone:
+`az resource delete --ids "$(az resource show -g ai_news_feed -n 'Application Insights Smart Detection' --resource-type microsoft.insights/actiongroups --query id -o tsv)"`
+
+> ⚠️ **Same-name note (still relevant for P2):** `ainewsfeed` is the name of the
+> live ACS (Microsoft.Communication). The identically-named storage account is
+> now gone, but keep checking resource *type* when you operate on `ainewsfeed`.
 
 ### What's inconsistent
 
@@ -67,12 +72,15 @@ list in `banking_commons.email` can then be retired).
 
 ## Migration phases
 
-- **P1 — cleanup** (runbook below): delete the 5 cruft resources, drop the empty
-  `regulations` RG. Removes ~3 storage accounts, a duplicate App Insights, an
-  orphan identity, and a whole RG. Non-destructive to anything live.
-- **P2 — shared ACS:** stand up `rg-banking-shared` + `acs-banking`, repoint all
-  four senders, retire the old ACS. (ACS + managed domain can't be moved in
-  place; recreate and re-verify the sender domain.)
+- **P1 — cleanup ✅ done (2026-06-13):** deleted the 5 cruft resources and the
+  empty `regulations` RG. Removed 3 storage accounts, a duplicate App Insights,
+  an orphan identity, and a whole RG, with no impact on anything live.
+- **P2 — shared ACS (next):** stand up `rg-banking-shared` + `acs-banking`,
+  repoint all four senders, retire the old ACS, then delete the now-ACS-only
+  `ai_news_feed` RG. (ACS + managed domain can't be moved in place; recreate and
+  re-verify the sender domain. Note: a new Azure-managed domain means a new
+  sender address — update `ACS_SENDER_ADDRESS` / `EMAIL_SENDER` in all four
+  senders, or bring your own domain to keep the address stable.)
 - **P3 — standardize Functions:** move banking-legislation-tracker to Flex +
   managed identity (drop connection strings), align Python 3.12, shared workspace.
 - **P4 — RG taxonomy:** split `bank-data`, rename to the `rg-<project>` scheme.
@@ -81,8 +89,11 @@ list in `banking_commons.email` can then be retired).
 
 ## P1 cleanup runbook
 
-Read-only verification first; destructive commands are clearly marked. Nothing
-here is executed for you — run it yourself after reading.
+> ✅ **Executed 2026-06-13.** Kept for reference / reproducibility. Verified
+> afterward: the `regulations` RG is gone and the `ai_news_feed` RG holds only
+> the ACS (+ the leftover action group noted above).
+
+Read-only verification first; destructive commands are clearly marked.
 
 ```bash
 SUB=70e0cd03-fbee-44bb-8617-4b2ea3f12837
