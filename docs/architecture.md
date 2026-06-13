@@ -50,9 +50,26 @@ stays in each project — only the render+send mechanism is shared.
   (currently hand-rolled in three projects as `PaperTracker`, `FilingsManifest`,
   `StateStore`). Each project keeps its own row schema on top.
 
+## Consumers
+
+The `email` module is used by all four email senders. Each keeps its own
+content builders and error policy; only render+send is shared:
+
+| Project                     | Wrapper module                       | Error policy (`send_email` args)              |
+| --------------------------- | ------------------------------------ | --------------------------------------------- |
+| comment_summarization       | `bin/notify.py`                      | swallow config + send (best-effort local run) |
+| ai_news_feed                | `shared_code/email_utilities.py`     | swallow config + send                         |
+| bank-filings-pipeline       | `src/bank_data/email_utilities.py`   | raise config, swallow send (fail-fast deploy) |
+| banking-legislation-tracker | `src/banking_tracker/email_report.py`| raise config + send                           |
+
+The two Azure Functions consumers (ai_news_feed, banking-legislation-tracker)
+install this package from its **private** git URL, so their remote (Oryx) builds
+need git credentials — or this repo goes public. See each project's deployment
+notes.
+
 ## Migration order
 
-1. **email** into one consumer as a proof of concept (`comment_summarization`).
-2. Roll email out to the other three email senders.
-3. Extract `llm`, then `storage`, the same way: superset module, one consumer,
-   then roll out.
+1. ✅ **email** — proof of concept (`comment_summarization`), then rolled out to
+   the other three senders.
+2. Extract `llm` (lift ai_news_feed's `LLMClient`), then `storage`, the same
+   way: superset module, one consumer, then roll out.
