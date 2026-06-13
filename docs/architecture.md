@@ -14,6 +14,9 @@ those lifecycles. A pip-installable package shares code without coupling deploys
 Consumers pin a tag (`@v0.1.0`) so an upstream change can't silently break a
 daily run.
 
+For the Azure-side picture (deployed resources, cruft, target layout, and the P1
+cleanup runbook) see [azure-architecture.md](azure-architecture.md).
+
 ## Layout
 
 ```

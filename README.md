@@ -12,6 +12,12 @@ shared copy. First module shipped: **ACS email** (the daily-digest sender that
 was copy-pasted into four repos). LLM-client and Azure-storage helpers are
 planned next — see [docs/architecture.md](docs/architecture.md).
 
+Docs:
+- [docs/architecture.md](docs/architecture.md) — package design, modules, consumers.
+- [docs/azure-architecture.md](docs/azure-architecture.md) — cross-project map of
+  the deployed Azure resources, what's cruft, the target layout, and the P1
+  cleanup runbook.
+
 ## Install
 
 From another project's virtualenv:
