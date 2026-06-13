@@ -6,42 +6,37 @@ single map of what's deployed, what's cruft, and the target layout. It lives in
 `banking-commons` because the shared resource (ACS email) is the infra twin of
 the shared `banking_commons.email` code.
 
-> Snapshot date: 2026-06-13, **after P1 cleanup**. Re-run the audit commands at
-> the bottom if it's been a while.
+> Snapshot date: 2026-06-13, **after P2 (shared ACS)**. Re-run the audit commands
+> at the bottom if it's been a while.
 
 ## Current state
 
 | Project | Compute | Data storage → contents | Email | Resource group(s) |
 | --- | --- | --- | --- | --- |
-| ai_news_feed | Functions **Flex** (`feltonainews`) | `feltonainews` → `ProcessedPapers` | ACS `ainewsfeed` (mgd-identity storage) | **feltonainews** (compute) + **ai_news_feed** (ACS only) |
-| banking-legislation-tracker | Functions **Consumption** (`EastUSLinuxDynamicPlan`) | `bankinglegislation` → `TrackedBills`, `TrackerMeta` | ACS `ainewsfeed` (conn-string) | bank-data |
-| bank-filings-pipeline | local cron | `bankdata1` → `FilingsManifest`, `sec-filings` | ACS `ainewsfeed` | bank-data (storage only) |
-| comment_summarization | local launchd | local FS | ACS `ainewsfeed` | — (local only) |
+| ai_news_feed | Functions **Flex** (`feltonainews`) | `feltonainews` → `ProcessedPapers` | ACS `acs-banking` (EMAIL_SENDER) | feltonainews |
+| banking-legislation-tracker | Functions **Consumption** (`EastUSLinuxDynamicPlan`) | `bankinglegislation` → `TrackedBills`, `TrackerMeta` | ACS `acs-banking` (conn-string) | bank-data |
+| bank-filings-pipeline | local cron | `bankdata1` → `FilingsManifest`, `sec-filings` | ACS `acs-banking` | bank-data (storage only) |
+| comment_summarization | local launchd | local FS | ACS `acs-banking` | — (local only) |
 | congressional-transcripts | local | local FS | — | — |
+| _shared_ | — | — | ACS `acs-banking` + managed domain | **rg-banking-shared** |
 
-**All four email senders share one ACS resource** (`ainewsfeed`). That sharing is
-correct; the remaining issue is it's named after one app and lives alone in the
-`ai_news_feed` RG. P2 relocates it to a neutral shared RG.
+**All four email senders share one ACS resource** (`acs-banking` in
+`rg-banking-shared`). Sender: `DoNotReply@a7665fc6-00a7-47d3-804e-53ee4a14b462.azurecomm.net`.
+This is the infra twin of the shared `banking_commons.email` code.
 
-### Removed in P1 — ✅ done 2026-06-13
+### Removed in P1/P2 — ✅ done 2026-06-13
 
-| Resource | Group | Status |
+| Resource | Group | Phase |
 | --- | --- | --- |
-| `ainewsfeedstorage` (storage) | ai_news_feed | deleted |
-| `ainewsfeed` (storage) | ai_news_feed | deleted |
-| `ainewsfeed` (App Insights) | ai_news_feed | deleted |
-| `ainewsfeed-uami` (managed identity) | ai_news_feed | deleted |
-| `regulations1` (storage) + `regulations` RG | regulations | deleted (RG gone) |
+| `ainewsfeedstorage` (storage) | ai_news_feed | P1 |
+| `ainewsfeed` (storage) | ai_news_feed | P1 |
+| `ainewsfeed` (App Insights) | ai_news_feed | P1 |
+| `ainewsfeed-uami` (managed identity) | ai_news_feed | P1 |
+| `regulations1` (storage) + `regulations` RG | regulations | P1 |
+| `ainewsfeed` ACS + the whole `ai_news_feed` RG | ai_news_feed | P2 |
 
-After P1 the `ai_news_feed` RG holds only the live ACS, plus one harmless
-leftover — an auto-created `Application Insights Smart Detection` action group
-(orphaned when its App Insights was deleted). It costs nothing and disappears
-when the RG is removed at the end of P2; delete early if you want it gone:
-`az resource delete --ids "$(az resource show -g ai_news_feed -n 'Application Insights Smart Detection' --resource-type microsoft.insights/actiongroups --query id -o tsv)"`
-
-> ⚠️ **Same-name note (still relevant for P2):** `ainewsfeed` is the name of the
-> live ACS (Microsoft.Communication). The identically-named storage account is
-> now gone, but keep checking resource *type* when you operate on `ainewsfeed`.
+The old `ainewsfeed` ACS and its resource group are gone; the new shared ACS
+lives in `rg-banking-shared`.
 
 ### What's inconsistent
 
@@ -75,15 +70,15 @@ list in `banking_commons.email` can then be retired).
 - **P1 — cleanup ✅ done (2026-06-13):** deleted the 5 cruft resources and the
   empty `regulations` RG. Removed 3 storage accounts, a duplicate App Insights,
   an orphan identity, and a whole RG, with no impact on anything live.
-- **P2 — shared ACS (next):** stand up `rg-banking-shared` + `acs-banking`,
-  repoint all four senders, retire the old ACS, then delete the now-ACS-only
-  `ai_news_feed` RG. (ACS + managed domain can't be moved in place; recreate and
-  re-verify the sender domain. Note: a new Azure-managed domain means a new
-  sender address — update `ACS_SENDER_ADDRESS` / `EMAIL_SENDER` in all four
-  senders, or bring your own domain to keep the address stable.)
-- **P3 — standardize Functions:** move banking-legislation-tracker to Flex +
-  managed identity (drop connection strings), align Python 3.12, shared workspace.
-- **P4 — RG taxonomy:** split `bank-data`, rename to the `rg-<project>` scheme.
+- **P2 — shared ACS ✅ done (2026-06-13):** stood up `rg-banking-shared` +
+  `acs-banking` + managed domain, repointed all four senders (new sender
+  `DoNotReply@a7665fc6-…azurecomm.net`), verified, and deleted the old
+  `ainewsfeed` ACS along with its entire `ai_news_feed` RG.
+- **P3 — standardize Functions (next):** move banking-legislation-tracker to Flex
+  + managed identity (drop connection strings — it's the last sender still using
+  one), align Python 3.12, point both apps at a shared Log Analytics workspace.
+- **P4 — RG taxonomy:** split `bank-data` into `rg-bank-filings` +
+  `rg-banking-legislation`; rename to the `rg-<project>` scheme.
 
 ---
 
@@ -145,11 +140,15 @@ it to `rg-banking-shared`, after which the `ai_news_feed` RG can also be deleted
 
 ## P2 runbook — shared ACS
 
+> ✅ **Executed 2026-06-13.** Verified afterward: `rg-banking-shared/acs-banking`
+> is live, all four senders resolve to its endpoint with the new sender address,
+> and the old `ainewsfeed` ACS + `ai_news_feed` RG are deleted. Kept for
+> reference / reproducibility.
+
 Stands up `acs-banking` in a neutral `rg-banking-shared`, repoints all four
-senders, verifies, then retires the old `ainewsfeed` ACS and its RG. Not executed
-for you — run after reading. A new Azure-managed domain means a **new sender
-address** (Step 3); the recipient var (`DIGEST_RECIPIENT` / `EMAIL_TO`) is
-unchanged everywhere.
+senders, verifies, then retires the old `ainewsfeed` ACS and its RG. A new
+Azure-managed domain means a **new sender address** (Step 3); the recipient var
+(`DIGEST_RECIPIENT` / `EMAIL_TO`) is unchanged everywhere.
 
 ```bash
 SUB=70e0cd03-fbee-44bb-8617-4b2ea3f12837
